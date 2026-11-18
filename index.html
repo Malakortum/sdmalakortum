@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ฮีโร่แยกขยะ</title>
+<link href="https://fonts.googleapis.com/css2?family=Mali:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b2a3a;font-family:"Mali","Leelawadee UI",Tahoma,sans-serif;color:#fff}
+  canvas{display:block;width:100vw;height:100vh}
+  video{display:none}
+  .screen{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-1deg);width:min(880px,88vw);display:flex;flex-direction:column;align-items:center;text-align:center;gap:16px;padding:32px 28px;background:#fff8e7;color:#1b1b1b;border:5px solid #1b1b1b;border-radius:26px;box-shadow:12px 12px 0 #1b1b1b}
+  .screen h1{font-size:clamp(36px,6vw,72px);margin:0}
+  .screen p{font-size:clamp(18px,2.2vw,28px);margin:0;max-width:900px;line-height:1.5}
+  .btns{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+  button{font:inherit;font-size:clamp(20px,2.3vw,28px);padding:14px 30px;border:4px solid #1b1b1b;border-radius:16px;cursor:pointer;background:#ffcf33;color:#1b1b1b;font-weight:700;box-shadow:6px 6px 0 #1b1b1b}
+  button.alt{background:#8fd3ff}
+  button:active{transform:translate(4px,4px);box-shadow:2px 2px 0 #1b1b1b}
+  .hidden{display:none!important}
+  #status{font-size:17px;color:#555}
+  .bins-legend{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;font-size:clamp(16px,1.8vw,22px)}
+  .bins-legend span{padding:8px 14px;border-radius:12px;font-weight:700;border:3px solid #1b1b1b;color:#fff}
+</style>
+</head>
+<body>
+<video id="video" playsinline muted></video>
+<canvas id="c"></canvas>
+
+<div id="start" class="screen">
+  <h1>ฮีโร่แยกขยะ</h1>
+  <p><b>โบกมือ</b> ไปแตะขยะเพื่อหยิบ → พาไปที่ถังที่ถูกต้อง → ขยะจะลงถังเอง!</p>
+  <div class="bins-legend">
+    <span style="background:#2fb553">ขยะเปียก</span>
+    <span style="background:#f2c200;color:#1b1b1b">รีไซเคิล</span>
+    <span style="background:#2f7fe0">ขยะทั่วไป</span>
+    <span style="background:#e0453a">ขยะอันตราย</span>
+  </div>
+  <div class="btns">
+    <button class="alt" onclick="startGame(1)">ป.1–3 (2 ถัง)</button>
+    <button onclick="startGame(2)">ป.4–6 (4 ถัง)</button>
+  </div>
+  <div id="status">กำลังเปิดกล้อง...</div>
+</div>
+
+<div id="end" class="screen hidden">
+  <h1 id="endTitle"></h1>
+  <p id="endText"></p>
+  <div class="btns">
+    <button class="alt" onclick="showStart()">เล่นอีกครั้ง</button>
+  </div>
+</div>
+
+<script type="module">
+const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+const video = document.getElementById('video');
+const statusEl = document.getElementById('status');
+let W, H;
+function resize(){ W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+addEventListener('resize', resize); resize();
+
+const BINS = {
+  green:  {name:'ขยะเปียก',   color:'#2fb553', dark:'#1c7a37', icon:'🍃'},
+  yellow: {name:'รีไซเคิล',   color:'#f2c200', dark:'#a88700', icon:'♻️'},
+  blue:   {name:'ขยะทั่วไป', color:'#2f7fe0', dark:'#1d5299', icon:'🗑️'},
+  red:    {name:'ขยะอันตราย', color:'#e0453a', dark:'#992a22', icon:'⚠️'},
+};
+const ITEMS = [
+  {e:'🍌',n:'เปลือกกล้วย',b:'green',f:'เศษอาหารหมักเป็นปุ๋ยให้ต้นไม้ได้!'},
+  {e:'🍎',n:'แกนแอปเปิล',b:'green',f:'ขยะเปียกย่อยสลายได้เองตามธรรมชาติ'},
+  {e:'🥚',n:'เปลือกไข่',b:'green',f:'เปลือกไข่บดเป็นปุ๋ยให้ต้นไม้ได้'},
+  {e:'🍂',n:'ใบไม้แห้ง',b:'green',f:'ใบไม้แห้งทำปุ๋ยหมักได้ดีมาก'},
+  {e:'🐟',n:'ก้างปลา',b:'green',f:'เศษอาหารควรแยกออก ไม่ให้ปนกับขยะอื่น'},
+  {e:'🧴',n:'ขวดพลาสติก',b:'yellow',f:'ขวดพลาสติกรีไซเคิลเป็นเสื้อได้นะ!'},
+  {e:'🥫',n:'กระป๋อง',b:'yellow',f:'กระป๋องอะลูมิเนียมรีไซเคิลได้แทบไม่จำกัดครั้ง'},
+  {e:'📰',n:'หนังสือพิมพ์',b:'yellow',f:'รีไซเคิลกระดาษช่วยลดการตัดต้นไม้'},
+  {e:'📦',n:'กล่องกระดาษ',b:'yellow',f:'กล่องกระดาษนำกลับมาทำกล่องใหม่ได้'},
+  {e:'🍾',n:'ขวดแก้ว',b:'yellow',f:'แก้วหลอมแล้วทำขวดใหม่ได้เรื่อย ๆ'},
+  {e:'🍬',n:'ซองขนม',b:'blue',f:'ซองขนมมีหลายชั้นซ้อนกัน เลยรีไซเคิลยาก'},
+  {e:'🧻',n:'ทิชชู่ใช้แล้ว',b:'blue',f:'ทิชชู่ใช้แล้วสกปรก รีไซเคิลไม่ได้'},
+  {e:'🍱',n:'กล่องโฟม',b:'blue',f:'โฟมใช้เวลาย่อยสลายนานหลายร้อยปี'},
+  {e:'🩹',n:'พลาสเตอร์ยา',b:'blue',f:'ของใช้แล้วที่ปนเปื้อน ทิ้งถังทั่วไป'},
+  {e:'🔋',n:'ถ่านไฟฉาย',b:'red',f:'ถ่านมีสารเคมีอันตรายต่อดินและน้ำ'},
+  {e:'💡',n:'หลอดไฟ',b:'red',f:'หลอดไฟบางชนิดมีสารปรอทอยู่ข้างใน'},
+  {e:'💊',n:'ยาหมดอายุ',b:'red',f:'ยาหมดอายุห้ามทิ้งรวมกับขยะทั่วไป'},
+  {e:'📱',n:'มือถือเก่า',b:'red',f:'ขยะอิเล็กทรอนิกส์มีโลหะหนัก ต้องแยกทิ้ง'},
+  {e:'🌡️',n:'ปรอทวัดไข้',b:'red',f:'ปรอทเป็นพิษ ถ้าแตกห้ามจับด้วยมือ'},
+];
+
+// ---------- game state ----------
+let level = 1, bins = [], pool = [], items = [], running = false;
+let score = 0, correct = 0, wrong = 0, earth = 50, timeLeft = 60, lastT = 0;
+let msg = null, particles = [];
+const GAME_TIME = 60;
+
+function layoutBins(){
+  const keys = level === 1 ? ['green','yellow'] : ['green','yellow','blue','red'];
+  const n = keys.length, bw = Math.min(W / n * 0.8, 300), bh = Math.min(H * 0.24, 230);
+  bins = keys.map((k,i)=>({k, ...BINS[k], x: W/n*(i+0.5) - bw/2, y: H - bh - 14, w: bw, h: bh, shake:0, glow:0}));
+}
+function spawn(){
+  const it = pool[Math.floor(Math.random()*pool.length)];
+  items.push({...it, x: W*(0.15+Math.random()*0.7), y: -60, vy: H*(0.045+Math.random()*0.03), held:false, size: Math.min(W,H)*0.11, wob:Math.random()*6});
+}
+window.startGame = (lv)=>{
+  level = lv; layoutBins();
+  pool = ITEMS.filter(i => bins.some(b=>b.k===i.b));
+  items = []; particles = []; score = correct = wrong = 0; earth = 50; timeLeft = GAME_TIME; msg = null;
+  spawn(); running = true; lastT = performance.now();
+  document.getElementById('start').classList.add('hidden');
+  document.getElementById('end').classList.add('hidden');
+};
+window.showStart = ()=>{
+  document.getElementById('end').classList.add('hidden');
+  document.getElementById('start').classList.remove('hidden');
+};
+function endGame(){
+  running = false; heldItem = null;
+  const acc = correct + wrong ? Math.round(correct/(correct+wrong)*100) : 0;
+  let title;
+  if (correct >= 15) title = 'ฮีโร่รักษ์โลกระดับตำนาน!';
+  else if (correct >= 10) title = 'ฮีโร่รักษ์โลกระดับทอง!';
+  else if (correct >= 5) title = 'ฮีโร่รักษ์โลกระดับเงิน!';
+  else title = 'ฮีโร่รักษ์โลกฝึกหัด!';
+  document.getElementById('endTitle').textContent = title;
+  document.getElementById('endText').innerHTML = `แยกขยะถูก <b>${correct}</b> ชิ้น · ผิด ${wrong} ชิ้น · ความแม่นยำ ${acc}%<br>กลับบ้านไปช่วยที่บ้านแยกขยะด้วยนะ`;
+  document.getElementById('end').classList.remove('hidden');
+}
+addEventListener('keydown', e=>{ if(e.code==='Space' && !running) startGame(level); });
+
+// ---------- input (hand + mouse fallback) ----------
+let hand = {x:-999, y:-999, closed:false, seen:false};
+let heldItem = null, wasClosed = false;
+canvas.addEventListener('mousemove', e=>{ if(!handOK){ hand.x=e.clientX; hand.y=e.clientY; hand.seen=true; }});
+canvas.addEventListener('mousedown', ()=>{ if(!handOK) hand.closed = true; });
+addEventListener('mouseup', ()=>{ if(!handOK) hand.closed = false; });
+
+// โหมดโบกมือ: แตะขยะ = หยิบ, พาไปถึงถัง = ทิ้งเอง (ไม่ต้องกำมือ)
+let lostT = 0;
+function handleGrip(){
+  if (!running) return;
+  if (!hand.seen){
+    lostT += 1/60;
+    if (heldItem && lostT > 0.6){ heldItem.held = false; heldItem = null; } // มือหายจากกล้อง → ปล่อยให้ตกต่อ
+    return;
+  }
+  lostT = 0;
+  if (!heldItem){
+    for (const it of items){
+      if (Math.hypot(it.x-hand.x, it.y-hand.y) < it.size*0.9){ heldItem = it; it.held = true; break; }
+    }
+  }
+  if (heldItem){
+    heldItem.x += (hand.x-heldItem.x)*0.5; heldItem.y += (hand.y-heldItem.y)*0.5;
+    const bin = bins.find(b => heldItem.x > b.x && heldItem.x < b.x + b.w && heldItem.y > b.y);
+    if (bin){ dropItem(heldItem, bin); heldItem = null; }
+  }
+}
+function dropItem(it, bin){
+  it.held = false;
+  items.splice(items.indexOf(it),1);
+  if (bin.k === it.b){
+    correct++; score += 10; earth = Math.min(100, earth+8); bin.glow = 1;
+    burst(it.x, it.y, bin.color);
+    msg = {ok:true, title:`เก่งมาก! ${it.e} ${it.n} → ถัง${BINS[it.b].name}`, text:it.f, t:3};
+  } else {
+    wrong++; earth = Math.max(0, earth-8); bin.shake = 1;
+    msg = {ok:false, title:`อุ๊ย! ${it.e} ${it.n} ต้องใส่ถัง${BINS[it.b].name}`, text:it.f, t:3};
+  }
+  if (items.length < 2) spawn();
+}
+function burst(x,y,c){ for(let i=0;i<24;i++){ const a=Math.random()*Math.PI*2, s=150+Math.random()*300; particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-200,c,life:1}); } }
+
+// ---------- MediaPipe hand tracking ----------
+let handOK = false, landmarker = null, lastVideoTime = -1;
+async function initHands(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720,facingMode:'user'}});
+    video.srcObject = stream; await video.play();
+    statusEl.textContent = 'เปิดกล้องแล้ว กำลังโหลดตัวจับมือ...';
+    const {FilesetResolver, HandLandmarker} = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const fs = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    const opts = d => ({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate:d}, runningMode:'VIDEO', numHands:1});
+    try { landmarker = await HandLandmarker.createFromOptions(fs, opts('GPU')); }
+    catch { landmarker = await HandLandmarker.createFromOptions(fs, opts('CPU')); }
+    handOK = true;
+    statusEl.textContent = 'พร้อมเล่น! ยกมือขึ้นหน้ากล้อง (ห่างประมาณ 1–1.5 เมตร)';
+  }catch(err){
+    console.error(err);
+    statusEl.textContent = 'เปิดกล้อง/ตัวจับมือไม่ได้ — เล่นด้วยเมาส์แทนได้ (กดค้าง = หยิบ) · ตรวจว่าอนุญาตกล้องและต่ออินเทอร์เน็ต';
+  }
+}
+function d2(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function trackHand(){
+  if (!handOK || video.readyState < 2 || video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  const r = landmarker.detectForVideo(video, performance.now());
+  if (!r.landmarks || !r.landmarks.length){ hand.seen = false; hand.closed = false; handPts = null; return; }
+  const L = r.landmarks[0];
+  handPts = L.map(p => ({x: (1 - (0.5 + (p.x-0.5)*1.4)) * W, y: (0.5 + (p.y-0.5)*1.4) * H}));
+  // จุดกึ่งกลางฝ่ามือ + ขยายระยะให้เด็กเอื้อมถึงขอบจอ
+  let nx = (L[0].x + L[9].x)/2, ny = (L[0].y + L[9].y)/2;
+  nx = 0.5 + (nx-0.5)*1.4; ny = 0.5 + (ny-0.5)*1.4;
+  const tx = (1 - nx) * W, ty = ny * H; // กลับด้านแบบกระจก
+  hand.x = hand.seen ? hand.x + (tx-hand.x)*0.55 : tx;
+  hand.y = hand.seen ? hand.y + (ty-hand.y)*0.55 : ty;
+  hand.seen = true;
+  // กำมือ: ปลายนิ้วเข้าใกล้ข้อมือ เทียบกับขนาดฝ่ามือ
+  const palm = d2(L[0], L[9]);
+  const tips = (d2(L[8],L[0]) + d2(L[12],L[0]) + d2(L[16],L[0]) + d2(L[20],L[0]))/4;
+  const ratio = tips / palm;
+  if (hand.closed){ if (ratio > 1.55) hand.closed = false; }
+  else { if (ratio < 1.25) hand.closed = true; }
+}
+
+// ---------- drawing ----------
+function sticker(x,y,w,h,fill){ ctx.fillStyle='#1b1b1b'; ctx.beginPath(); ctx.roundRect(x+7,y+7,w,h,18); ctx.fill();
+  ctx.fillStyle=fill; ctx.beginPath(); ctx.roundRect(x,y,w,h,18); ctx.fill(); ctx.lineWidth=4; ctx.strokeStyle='#1b1b1b'; ctx.stroke(); }
+
+function drawVideo(){
+  if (handOK && video.videoWidth){
+    const vw = video.videoWidth, vh = video.videoHeight, s = Math.max(W/vw, H/vh);
+    ctx.save(); ctx.translate(W,0); ctx.scale(-1,1);
+    ctx.drawImage(video, (W-vw*s)/2, (H-vh*s)/2, vw*s, vh*s);
+    ctx.restore();
+  } else {
+    const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#7fd3f7'); g.addColorStop(1,'#c9f2c7');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  }
+}
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); }
+function drawBins(dt){
+  for (const b of bins){
+    const sx = b.shake>0 ? Math.sin(performance.now()/25)*12*b.shake : 0;
+    b.shake = Math.max(0,b.shake-dt*2); b.glow = Math.max(0,b.glow-dt*1.5);
+    const hover = heldItem && heldItem.x > b.x && heldItem.x < b.x+b.w;
+    ctx.save(); ctx.translate(sx,0);
+    if (b.glow>0 || hover){ ctx.shadowColor = '#fff'; ctx.shadowBlur = 40*(hover?1:b.glow); }
+    rr(b.x, b.y+b.h*0.12, b.w, b.h*0.88, 18); ctx.fillStyle = b.color; ctx.fill(); ctx.lineWidth=5; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+    ctx.shadowBlur = 0;
+    rr(b.x-10, b.y, b.w+20, b.h*0.16, 12); ctx.fillStyle = b.dark; ctx.fill(); ctx.lineWidth=5; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    
+    ctx.font = `bold ${Math.min(b.h*0.2, b.w*0.17)}px Mali,Tahoma, sans-serif`;
+    ctx.fillStyle = b.k==='yellow' ? '#3a2a00' : '#fff';
+    ctx.fillText(b.name, b.x+b.w/2, b.y+b.h*0.58);
+    ctx.restore();
+  }
+}
+function drawItems(dt){
+  for (const it of [...items]){
+    if (!it.held){
+      it.y += it.vy*dt; it.wob += dt*3;
+      if (it.y > H - bins[0].h*0.5){ // ตกถึงพื้นโดยไม่มีใครเก็บ → สุ่มใหม่
+        items.splice(items.indexOf(it),1); spawn(); continue;
+      }
+    }
+    const s = it.size*(it.held?1.15:1);
+    ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.held?0:Math.sin(it.wob)*0.15);
+    ctx.beginPath(); ctx.arc(0,0,s*0.62,0,Math.PI*2); ctx.fillStyle='#fff8e7'; ctx.fill(); ctx.lineWidth=4; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font = `${s*0.75}px sans-serif`; ctx.fillText(it.e,0,s*0.03);
+    ctx.font = `bold ${s*0.2}px Mali,Tahoma, sans-serif`;
+    ctx.lineWidth=5; ctx.strokeStyle='rgba(0,0,0,.6)'; ctx.strokeText(it.n,0,s*0.82);
+    ctx.fillStyle='#fff'; ctx.fillText(it.n,0,s*0.82);
+    ctx.restore();
+  }
+  if (items.length === 0) spawn();
+}
+let handPts = null;
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawHand(){
+  if (!hand.seen) return;
+  if (handPts){ // โครงมือ AR
+    ctx.strokeStyle='rgba(120,255,200,.9)'; ctx.lineWidth=5; ctx.lineCap='round';
+    for (const [a,b] of BONES){ ctx.beginPath(); ctx.moveTo(handPts[a].x,handPts[a].y); ctx.lineTo(handPts[b].x,handPts[b].y); ctx.stroke(); }
+    ctx.fillStyle='#fff';
+    for (const p of handPts){ ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill(); }
+  }
+  // วงแหวนตรงฝ่ามือ = จุดที่ใช้หยิบ
+  const r = Math.min(W,H)*0.05;
+  ctx.beginPath(); ctx.arc(hand.x, hand.y, r, 0, Math.PI*2);
+  ctx.strokeStyle = heldItem ? '#ffd23f' : 'rgba(255,255,255,.9)'; ctx.lineWidth = 6; ctx.stroke();
+  if (!handPts){ ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font=`${r*1.6}px sans-serif`; ctx.fillText('🖐️', hand.x, hand.y); }
+}
+function drawHUD(){
+  ctx.textBaseline='top'; ctx.textAlign='left';
+  const f = Math.min(W,H)*0.045;
+  ctx.font=`bold ${f}px Mali,Tahoma, sans-serif`; sticker(16,16,ctx.measureText(`เวลา ${Math.ceil(timeLeft)}   ถูก ${correct}`).width+36,f*1.6,'#fff8e7');
+  ctx.fillStyle='#1b1b1b';
+  ctx.fillText(`เวลา ${Math.ceil(timeLeft)}   ถูก ${correct}`, 32, 16+f*0.3);
+  // หลอดพลังโลก
+  const ex = W-16-f*7.5;
+  sticker(ex,16,f*7.5,f*1.6,'#fff8e7');
+  ctx.fillStyle='#1b1b1b'; ctx.font=`bold ${f*0.8}px Mali,Tahoma,sans-serif`; ctx.fillText('โลก',ex+14,16+f*0.4);
+  const bx=ex+f*2.2, bw=f*4.8, by=16+f*0.5;
+  rr(bx,by,bw,f*0.6,10); ctx.fillStyle='#e8dcc0'; ctx.fill();
+  if (earth>0){ rr(bx,by,bw*earth/100,f*0.6,10); ctx.fillStyle= earth>=40?'#3fbf6a':'#e8553f'; ctx.fill(); }
+  rr(bx,by,bw,f*0.6,10); ctx.lineWidth=3; ctx.strokeStyle='#1b1b1b'; ctx.stroke();
+}
+function drawMsg(dt){
+  if (!msg) return;
+  msg.t -= dt; if (msg.t<=0){ msg=null; return; }
+  const f = Math.min(W,H)*0.04, w = Math.min(W*0.85, 900), h = f*3.4, x=(W-w)/2, y=H*0.14;
+  ctx.globalAlpha = Math.min(1, msg.t*2);
+  sticker(x,y,w,h,'#fff8e7'); ctx.fillStyle = msg.ok ? '#1f8a4c' : '#d0402f'; ctx.textAlign='center'; ctx.textBaseline='top';
+  ctx.font=`bold ${f}px Mali,Tahoma, sans-serif`; ctx.fillText(msg.title, W/2, y+f*0.45);
+  ctx.font=`${f*0.85}px Mali,Tahoma, sans-serif`; ctx.fillText('💡 '+msg.text, W/2, y+f*1.85);
+  ctx.globalAlpha = 1;
+}
+function drawParticles(dt){
+  for (const p of particles){ p.vy += 600*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt*1.3;
+    ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); }
+  ctx.globalAlpha=1; particles = particles.filter(p=>p.life>0);
+}
+
+function loop(t){
+  const dt = Math.min(0.05, (t-lastT)/1000 || 0); lastT = t;
+  trackHand();
+  drawVideo();
+  if (running){
+    timeLeft -= dt;
+    if (timeLeft <= 0){ timeLeft = 0; endGame(); }
+    if (Math.random() < dt*0.25 && items.length < 2) spawn();
+    handleGrip();
+    drawBins(dt); drawItems(dt); drawParticles(dt); drawHUD(); drawMsg(dt);
+  }
+  drawHand();
+  requestAnimationFrame(loop);
+}
+initHands();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
